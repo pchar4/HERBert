@@ -39,7 +39,8 @@ The second MSP (transmitter) uses pins 1.3, 1.4, and 1.5 to read the water level
 6. Relays: connect the water pump relay to pin 2.3 for the COM port, 3.3V power, and ground GND. The motor connects to the other end in the normally open (N O position). Connect the grow light relay to pin 2.4 for the COM port, 3.3V power, and ground GND. The motor connects to the other end in the normally connected (NC position).
 
 ## Logic
-![image](https://github.com/pchar4/HERBert/assets/43528347/ee2f89a7-cfbb-42d0-a792-8b56f3000d83)
+![image](https://github.com/pchar4/HERBert/assets/43528347/1956edae-2d9d-4435-aca7-d3e4b41ac486)
+
 
 
 ## Code Architecture
