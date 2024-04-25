@@ -5,35 +5,38 @@
 #include <math.h>
 #include <stdint.h>
 
-    // code tutorial by Dr Selim!
-#define ONE_SEC 12500  // Timer period for 1 sec on this clk
-#define C_note 10000000/261.63
 
-float water_voltage, soil_voltage, light_voltage;
-unsigned int adc[8];
-int soundbit[] = {C};
+#define ONE_SEC 12500  // Timer period for 1 sec on this clk
 #define TIMER_PERIOD 31250  // Timer period for 125 kHz clock and 0.25 sec interval
 
-int periods[] = {1000000/261.63,
+/*-----------------------------------------------------------------------------*/
+// CHANGE THIS VALUE TO SEE IN HOW MANY SECONDS TO WAKE UP YOUR PLANT AND POLL IT'S STATE
+#define CHECK_INTERVAL 3600 // defining how many seconds we wait until we check the state of the plant's environment
+/*-----------------------------------------------------------------------------*/
+int curr_interval;
+float water_voltage, soil_voltage, light_voltage; // variables to determine the environmental conditions
+unsigned int adc[8]; // array to hold the values from the analog reads from sensor
+
+int periods[] = {1000000/261.63, // more buzzer sound
    1000000/329.63,
    1000000/392.00,
    1000000/523.5};
-int which_period = 0;
+int which_period = 0; // which sound we want to play (customizable up to 4 options)
 
-unsigned char byteToTransmit[3];
-unsigned char byteSent = 0;
-unsigned char RXData[7];
-unsigned int byteRead = 0;
-unsigned char Reads;
-uint32_t temp;
-uint32_t hum;
-float floattemp;
-float floathum;
-char chartemp;
+unsigned char byteToTransmit[3]; // i2c transmission byte
+unsigned char byteSent = 0; // flag for sent
+unsigned char RXData[7]; // i2c data read back
+unsigned int byteRead = 0; // flag for read
+unsigned char Reads; // number of reads
+uint32_t temp; // stores temp reading
+uint32_t hum; // stores humidity reading
+float floattemp; // stores temp in celcius
+float floathum; // stores humidity in percent
+char chartemp; // char versions of above variables
 char charhum;
 
 
-#define SDA_PIN BIT7
+#define SDA_PIN BIT7 // pin definitions for the i2c bus
 #define SCL_PIN BIT6
 #define PRESCALE 12
 
@@ -72,7 +75,7 @@ void init_I2Cread(unsigned char slaveAddress){
 void I2C_read(unsigned char slaveAddress) {
     // Send start condition
     init_I2Cread(slaveAddress);
-    byteRead = 7;
+    byteRead = 7; // begin read
 
 
     UCB0CTL1 |= UCTXSTT;
@@ -84,7 +87,7 @@ void I2C_read(unsigned char slaveAddress) {
 }
 void I2cTransmit(unsigned char slaveAddress, unsigned char third, unsigned char reg, unsigned char byte, unsigned char Read)
 {
-    I2cTransmitInit(slaveAddress);
+    I2cTransmitInit(slaveAddress); // send transmit signal
     byteToTransmit[1] = reg;
     byteToTransmit[0] = byte;
     byteToTransmit[2] = third;
@@ -96,7 +99,7 @@ unsigned char I2cNotReady()
 {
     return (UCB0STAT & UCBBUSY); // Check if I2C bus is busy
 }
-void sendData(char data){
+void sendData(char data){ // sending UART DATA
     while(!(IFG2&UCA0TXIFG)); // wait for it to be clear
     UCA0TXBUF = data;
 
@@ -151,6 +154,7 @@ void main(void)
     DCOCTL = CALDCO_1MHZ;      // Set DCO step + modulation
     BCSCTL3 |= LFXT1S_2;       // ACLK = VLO
 
+    // UART CONFIGURATION
     P1SEL = BIT1|BIT2;
     P1SEL2 = BIT1|BIT2;                     // P1.1 = RXD, P1.2=TXD
     UCA0CTL1 |= UCSWRST+UCSSEL_2;
@@ -160,7 +164,7 @@ void main(void)
     UCA0CTL1 &= ~UCSWRST;                     // **Initialize USCI state machine**
     IE2 &= ~(UCA0RXIE| UCA0TXIE);               // Enable USCI_A0 TX/RX interrupt
 
-
+    // Configuring output pins
     P2DIR |= BIT5; // We need P2.5 to be output
     P2DIR |= BIT1; // Set P2.1 as output
     P2DIR |= BIT3; // Output on 2.3
@@ -173,7 +177,7 @@ void main(void)
     TA1CTL = TASSEL_2 + MC_1; // SMCLK, upmode
 
 
-
+    // Configuring 10 bit adc
     ADC10CTL1 = INCH_7 + ADC10DIV_0 + CONSEQ_3 + SHS_0; // enabling adc to read from entire of port 1
     ADC10CTL0 = SREF_0 + ADC10SHT_2 + MSC + ADC10ON; // turning adc on and configuring some variables
     ADC10AE0 = BIT5 + BIT4 + BIT3 + BIT0; // only saying that ADC works for P1.0, 1.3, 1.4, 1.5
@@ -191,6 +195,7 @@ void main(void)
     __enable_interrupt(); // global interrupt enable
 
     while(1){
+        if (curr_interval >= CHECK_INTERVAL){
         ADC10CTL0 &= ~ENC;
         while (ADC10CTL1 & BUSY); // wait until the adc is not busy
         ADC10CTL0 |= ENC + ADC10SC;
@@ -205,6 +210,7 @@ void main(void)
         if (soil_voltage > 2.7){
              // turn on the pump if soil is too dry
             P2OUT |= BIT3;
+            curr_interval = CHECK_INTERVAL - 1; // set it here so we check very quickly if the soil still needs pump
         } else {
              // turn off the pump once ideal wetness achieved
             P2OUT &= ~BIT3;
@@ -213,22 +219,25 @@ void main(void)
             // screech that you don't have water
              // Divide by 2
             volmod = 1;
-
+            curr_interval = CHECK_INTERVAL - 1; // quick checks to make sure it turns off within a second of getting water
         } else {
-            volmod = 10;
+            volmod = 10; // turn buzzer volume down to essentially 0
 
         }
-        if (light_voltage > 3.1){
+        if (light_voltage > 3.1){ // these can update on the hour, won't be a problem
             P2OUT |= BIT4; // turn off the lights
         } else {
             P2OUT &= ~BIT4; // turn on the lights
         }
-        tempRead();
-        sendData(chartemp);
+        tempRead(); // read the temperature and humidity always
+        sendData(chartemp); // send data to LCD
         sendData(charhum);
-        TA1CCR0 = periods[which_period];
+        TA1CCR0 = periods[which_period]; // update the state of the buzzer always
         TA1CCR2 = periods[which_period]>>volmod;
-        __bis_SR_register(LPM0_bits + GIE);
+        } else {
+            curr_interval++; // increment curr interval to get closer to the next time to run logic
+        }
+        __bis_SR_register(LPM0_bits + GIE); // enter LPM0 after being woken up and running this once
     }
 }
 
@@ -246,19 +255,6 @@ void __attribute__ ((interrupt(TIMER0_A0_VECTOR))) Timer_A0 (void)
     __bic_SR_register_on_exit(LPM0_bits);     // Clear LPM3 bits from 0(SR)
 }
 
-//// USCI A0 Transmit ISR
-//#if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
-//#pragma vector=USCIAB0TX_VECTOR
-//__interrupt void USCI0TX_ISR(void)
-//#elif defined(__GNUC__)
-//void __attribute__ ((interrupt(USCIAB0TX_VECTOR))) USCI0TX_ISR (void)
-//#else
-//#error Compiler not supported!
-//#endif
-//{
-//  unsigned char TxByte=77; // whatever value we want to transmit
-//  UCA0TXBUF = TxByte;                       // Read, justify, and transmit
-//}
 
 //#pragma vector = USCIAB0TX_VECTOR
 //__interrupt void USCIAB0TX_ISR(void)
