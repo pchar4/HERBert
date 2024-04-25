@@ -40,58 +40,51 @@ char charhum;
 #define SCL_PIN BIT6
 #define PRESCALE 12
 
-void I2cTransmitInit(unsigned char slaveAddress)
+void I2cTransmitInit(unsigned char subAddress)
 {
     P1SEL      |= SDA_PIN + SCL_PIN;               // Assign I2C pins to USCI_B0
-    P1SEL2     |= SDA_PIN + SCL_PIN;
+    P1SEL2     |= SDA_PIN + SCL_PIN;    
     UCB0CTL1    = UCSWRST;                         // Enable SW reset
     UCB0CTL0    = UCMST + UCMODE_3 + UCSYNC;       // I2C Master, synchronous mode
     UCB0CTL1    = UCSSEL_2 + UCSWRST;              // Use SMCLK, keep SW reset
     UCB0BR0     = PRESCALE;                        // Set prescaler - SMCLK = ~1048Khz/12 = 87.3Khz
     UCB0BR1     = 0;
-    UCB0I2CSA   = slaveAddress;                    // Set slave address
+    UCB0I2CSA   = subAddress;                    // Set sub address
     UCB0CTL1   &= ~UCSWRST;                        // Clear SW reset, resume operation
-    UCB0I2CIE   = UCNACKIE;                        // Interrupt on slave Nack
+    UCB0I2CIE   = UCNACKIE;                        // Interrupt on sub Nack
     IE2         = UCB0TXIE;                        // Enable TX interrupt
 }
 
-void init_I2Cread(unsigned char slaveAddress){
+void init_I2Cread(unsigned char subAddress){
     P1SEL |= BIT6 + BIT7;   // Assign P1.6 to SCL and P1.7 to SDA
     P1SEL2 |= BIT6 + BIT7;
 
     // Configure I2C module
     UCB0CTL1 |= UCSWRST;    // Enable software reset
-    UCB0CTL0 = UCMST + UCMODE_3 + UCSYNC;   // Master mode, I2C mode, synchronous mode
+    UCB0CTL0 = UCMST + UCMODE_3 + UCSYNC;   // Main mode, I2C mode, synchronous mode
     UCB0CTL1 = UCSSEL_2 + UCSWRST;  // Clock source: SMCLK, keep in reset
     UCB0BR0 = 12;   // Set clock divider for desired clock frequency (adjust according to your application)
     UCB0BR1 = 0;
-    UCB0I2CSA  = slaveAddress; //set sub address
+    UCB0I2CSA  = subAddress; //set sub address
     UCB0CTL1 &= ~UCSWRST;   // Release software reset
     IE2 |= UCB0RXIE;                          // Enable RX interrupt
 
 }
 
 
-void I2C_read(unsigned char slaveAddress) {
+void I2C_read(unsigned char subAddress) {
     // Send start condition
-    init_I2Cread(slaveAddress);
-    byteRead = 7; // begin read
-
-
-    UCB0CTL1 |= UCTXSTT;
-   // while(UCB0CTL & UCTXTT);
-    // Main transmit mode, generate start condition
-
- //   I2cNotReady();
-                          // Enter LPM0 w/ interrupts
+    init_I2Cread(subAddress);
+    byteRead = 7; // number of bytes that you want to read
+    UCB0CTL1 |= UCTXSTT; // send start condition
 }
-void I2cTransmit(unsigned char slaveAddress, unsigned char third, unsigned char reg, unsigned char byte, unsigned char Read)
+void I2cTransmit(unsigned char subAddress, unsigned char reg, unsigned char command, unsigned char third, unsigned char Read)
 {
-    I2cTransmitInit(slaveAddress); // send transmit signal
-    byteToTransmit[1] = reg;
-    byteToTransmit[0] = byte;
-    byteToTransmit[2] = third;
-    byteSent = 3;
+    I2cTransmitInit(subAddress); // send transmit signal
+    byteToTransmit[1] = command;  // transmit the command you want to send
+    byteToTransmit[0] = third;  // second part of the command
+    byteToTransmit[2] = reg;   // transmit the register you want to write to
+    byteSent = 3;      /number of bytes you want to transmit
     UCB0CTL1 |= UCTR + UCTXSTT; // Generate start condition
 }
 
@@ -101,47 +94,47 @@ unsigned char I2cNotReady()
 }
 void sendData(char data){ // sending UART DATA
     while(!(IFG2&UCA0TXIFG)); // wait for it to be clear
-    UCA0TXBUF = data;
+    UCA0TXBUF = data;   // write the data to the transmit buffer
 
 }
 
 void tempRead(){
-    unsigned char temp0;
-    unsigned char temp1;
-    unsigned char temp2;
-    unsigned char hum0;
-    unsigned char hum1;
-    unsigned char hum2;
-    float denom;
-    denom = pow(2, 20);
-    temp = 0;
+    unsigned char temp0; //first temperature byte
+    unsigned char temp1; //second temperature byte
+    unsigned char temp2; //half temperature byte
+    unsigned char hum0; //first humiditiy byte
+    unsigned char hum1; //second humiditiy byte
+    unsigned char hum2; //half humidity byte
+    float denom; //denominator
+    denom = pow(2, 20); //dividing factor
+    temp = 0;  
     hum = 0;
-    I2cTransmit(0x38,0xAC,0x33,0x00,3);
-    __delay_cycles(200000);
-    I2C_read(0x38);
-    __delay_cycles(200000);
-    temp2 = RXData[3] & 0x0F;
-    temp1 = RXData[2];
-    temp0 = RXData[1];
-    hum2 = RXData[5];
-    hum1 = RXData[4];
-    hum0 = RXData[3] & 0xF0;
-    temp <<= 8;
-    temp |= temp2;
-    temp <<= 8;
-    temp |= temp1;
-    temp <<= 8;
-    temp |= temp0;
-    hum <<= 8;
-    hum |= hum2;
-    hum <<= 8;
-    hum |= hum1;
-    hum <<= 8;
-    hum |= hum0;
-    hum >>=4;
-    floattemp = (float)temp;
+    I2cTransmit(0x38,0xAC,0x33,0x00,3); //send command to take measurement
+    __delay_cycles(200000); //wait 
+    I2C_read(0x38); //read 7 bytes of data
+    __delay_cycles(200000); //wait
+    temp2 = RXData[3] & 0x0F; //mask to only get temp data
+    temp1 = RXData[2]; //move to character
+    temp0 = RXData[1]; //move to character
+    hum2 = RXData[5]; //move to character
+    hum1 = RXData[4]; //move to character
+    hum0 = RXData[3] & 0xF0; //mask to only get humidity data
+    temp <<= 8; //shift
+    temp |= temp2; //set
+    temp <<= 8; //shift
+    temp |= temp1; //set
+    temp <<= 8; //shift
+    temp |= temp0; //set
+    hum <<= 8; //shift
+    hum |= hum2; //set
+    hum <<= 8; //shift
+    hum |= hum1; //set
+    hum <<= 8; //shift
+    hum |= hum0; //set
+    hum >>=4; //shift back(top part don't need zeros)
+    floattemp = (float)temp; //convert to floats
     floathum = (float)hum;
-    floattemp = ((floattemp/denom) *200) -50;
+    floattemp = ((floattemp/denom) *200) -50; //calculate using formulas
     floathum = (floathum/denom)*100;
 }
 
@@ -157,12 +150,12 @@ void main(void)
     // UART CONFIGURATION
     P1SEL = BIT1|BIT2;
     P1SEL2 = BIT1|BIT2;                     // P1.1 = RXD, P1.2=TXD
-    UCA0CTL1 |= UCSWRST+UCSSEL_2;
-    UCA0BR0 = 0x68; // 19200 baud at 1Mhz - coudl change to 0x68 for 9600 baud
+    UCA0CTL1 |= UCSWRST+UCSSEL_2;   / pause to give settings + select SMCLK
+    UCA0BR0 = 52; // 9600 baud rate running on SMCLK
     UCA0BR1 = 0;
     UCA0MCTL = UCBRS1 + UCBRS0;               // Modulation UCBRSx = 3
     UCA0CTL1 &= ~UCSWRST;                     // **Initialize USCI state machine**
-    IE2 &= ~(UCA0RXIE| UCA0TXIE);               // Enable USCI_A0 TX/RX interrupt
+    IE2 &= ~(UCA0RXIE| UCA0TXIE);               // Disable any interrupts -- to keep i2c functioning properly 
 
     // Configuring output pins
     P2DIR |= BIT5; // We need P2.5 to be output
@@ -255,18 +248,16 @@ void __attribute__ ((interrupt(TIMER0_A0_VECTOR))) Timer_A0 (void)
     __bic_SR_register_on_exit(LPM0_bits);     // Clear LPM3 bits from 0(SR)
 }
 
-
-//#pragma vector = USCIAB0TX_VECTOR
-//__interrupt void USCIAB0TX_ISR(void)
+//I2C Interrupt R
 #pragma vector = USCIAB0TX_VECTOR
 __interrupt void USCIAB0TX_ISR(void)
 {
-    if (!(IFG2 & UCB0RXIFG))
+    if (!(IFG2 & UCB0RXIFG)) //if on Transmit flag
     {
-        if (byteSent == 0) // If the byte was sent...
+        if (byteSent == 0) // If the last byte was sent...
         {
             UCB0CTL1 |= UCTXSTP; // Generate stop condition
-            IFG2 &= ~UCB0TXIFG;
+            IFG2 &= ~UCB0TXIFG; //clear the flag
         }
         else
         {
@@ -276,20 +267,16 @@ __interrupt void USCIAB0TX_ISR(void)
     }
     else if ((IFG2 & UCB0RXIFG))
     {
-        if (byteRead == 0) // If the byte was sent...
+        if (byteRead == 0) // If the last byte was sent...
         {
             UCB0CTL1 |= UCTXSTP; // Generate stop condition
-            IFG2 &= ~UCB0RXIFG;
+            IFG2 &= ~UCB0RXIFG; //clear the flag
         }
         else
         {
-            RXData[byteRead-1] = UCB0RXBUF;                         //Read data
+            RXData[byteRead-1] = UCB0RXBUF;       //Read data
             byteRead--; // Modify the variable accordingly
         }
-    }
-    else{
-        IFG2 &= ~UCA0TXIFG;
-        IFG2 &= ~UCA0RXIFG;
     }
 
 }
