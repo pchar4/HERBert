@@ -28,4 +28,5 @@ Pins 1.1 and 1.2 were reserved for UART communication with the other MSP.
 
 The second MSP (transmitter) uses pins 1.3, 1.4, and 1.5 to read the water level, soil moisture, and light levels from their respective sensors as an analog voltage value. This was done through setting up the 10-bit onboard ADC. Pins 1.6 and 1.7 were used exclusively for the temperature and humidity sensor which operated using i2c. Pins 1.1 and 1.2 were used for serial communication with the reciever MSP to send the temperature and humidity values to the reciever. Pins 2.3 and 2.4 were used as outputs to relays to control the water pump and lights respectively. Pin 2.5 was used to connect to the positive terminal of the buzzer (the negative terminal is grounded) in order to play a sound upon low water levels. 
 
-### Se
+### Sensor Setup & Peripherals
+1. Soil sensor: connect Vcc to 3.3V
