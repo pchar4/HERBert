@@ -8,6 +8,8 @@ This project is designed to run on TI's MSP430G2553 Launchpad. The goal is to au
   3. Turn on the grow lights when ambient lighting is too low for healthy plant growth.
   4. Monitor temperature and humidity of the environment and report it to the user on an LCD screen.
 
+## Video Link
+
 ## Parts List
 The following parts were used for the hardware setup:
 1. Water level sensors (1x)
@@ -41,8 +43,12 @@ The second MSP (transmitter) uses pins 1.3, 1.4, and 1.5 to read the water level
 The code architecture can be split into four main parts: periodic state checks for power savings, ADC setup, I2C setup, and UART setup. Details are as follows:
 
 ### Periodic State Checks
+The ISR wakes up ever second, increments a counter variable and goes to sleep. If the counter variable hits a user defined "number of seconds" defined at the top of the file, it then enters the state where it checks the environment of the plant. If the plant needs water or the water needs to be filled, it then sets the counter to enter the state check the very next second so that we aren't pumping water in hour increments. Once the every-second-checks indiciate that the once dry soil is no longer dry, or that the low water is now filled, it then exits this mode and goes back to the user-defined check period, which in this case is on an hourly basis. Between checks the device enters low power mode in order to save energy/power.
 
 ### ADC Setup
+This uses the onboard 10-bit ADC of the MSP. The setup involves creating an array to store a packet of information from the adc, then selecting which pins we want to actually enable the reads from, (a subset of port 1 in our case). After that, we would check to see that the ADC was no longer busy and query the values from it. The ADC operates on repeat-single channel mode (to continually get values), operates at the full clock speed and has a sample-and-hold time to 16 ADC10CLK cycles. This determines the duration the ADC samples the input signal, which is set to as long as possible to get a stable value.
+
+After the setup, when reading, we first disable conversions, wait until the ADC is free, then start conversions and store the first address the series of conversions at the start of the array, which we then read later on to get the values we need.
 
 ### I2C Setup
 
