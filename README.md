@@ -9,7 +9,7 @@ This project is designed to run on TI's MSP430G2553 Launchpad. The goal is to au
   4. Monitor temperature and humidity of the environment and report it to the user on an LCD screen.
 
 ## Video Link
-
+https://drive.google.com/file/d/1HoqjslrN5Bkjr_PRIginp1mUCrIiuvK6/view?usp=drivesdk
 ## Parts List
 The following parts were used for the hardware setup:
 1. Water level sensors (1x)
