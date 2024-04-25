@@ -1,282 +1,80 @@
+// Code originally from:
+// https://github.com/andrei-cb/I2C-Display-and-MSP430/tree/master
+// Then modified by Joe Young
+
+#include "lcd.h"
+#include "ultrasonic.h"
+#include "stdio.h"
 #include "msp430g2553.h"
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <math.h>
-#include <stdint.h>
+
+char temp;
+char hum;
+int bit;
+int humidity = 0;
+int temperature = 0;
+char str_hum[3];
+char str_temp[3];
 
 
-#define ONE_SEC 12500  // Timer period for 1 sec on this clk
-#define TIMER_PERIOD 31250  // Timer period for 125 kHz clock and 0.25 sec interval
-
-/*-----------------------------------------------------------------------------*/
-// CHANGE THIS VALUE TO SEE IN HOW MANY SECONDS TO WAKE UP YOUR PLANT AND POLL IT'S STATE
-#define CHECK_INTERVAL 3600 // defining how many seconds we wait until we check the state of the plant's environment
-/*-----------------------------------------------------------------------------*/
-int curr_interval;
-float water_voltage, soil_voltage, light_voltage; // variables to determine the environmental conditions
-unsigned int adc[8]; // array to hold the values from the analog reads from sensor
-
-int periods[] = {1000000/261.63, // more buzzer sound
-   1000000/329.63,
-   1000000/392.00,
-   1000000/523.5};
-int which_period = 0; // which sound we want to play (customizable up to 4 options)
-
-unsigned char byteToTransmit[3]; // i2c transmission byte
-unsigned char byteSent = 0; // flag for sent
-unsigned char RXData[7]; // i2c data read back
-unsigned int byteRead = 0; // flag for read
-unsigned char Reads; // number of reads
-uint32_t temp; // stores temp reading
-uint32_t hum; // stores humidity reading
-float floattemp; // stores temp in celcius
-float floathum; // stores humidity in percent
-char chartemp; // char versions of above variables
-char charhum;
+void readData(void){
+    while(!(IFG2&UCA0RXIFG)); //wait for the receive flag to be set
+    if (bit ==0){ //if on the first bit of data
+        temp = UCA0RXBUF; //read to temp
+        bit = 1;
+    }
+    else if(bit == 1){ //if on second bit of data
+        hum = UCA0RXBUF; //read to humidity
+        bit = 0;
+    }
+    humidity = (int)hum; //cast to integer
+    sprintf(str_hum, "%d", humidity); //convert to string
+    temperature = (int)temp; //cast to integer
+    sprintf(str_temp, "%d", temperature); //convert to string
 
 
-#define SDA_PIN BIT7 // pin definitions for the i2c bus
-#define SCL_PIN BIT6
-#define PRESCALE 12
+}
 
-void I2cTransmitInit(unsigned char subAddress)
+int main()
 {
-    P1SEL      |= SDA_PIN + SCL_PIN;               // Assign I2C pins to USCI_B0
-    P1SEL2     |= SDA_PIN + SCL_PIN;    
-    UCB0CTL1    = UCSWRST;                         // Enable SW reset
-    UCB0CTL0    = UCMST + UCMODE_3 + UCSYNC;       // I2C Master, synchronous mode
-    UCB0CTL1    = UCSSEL_2 + UCSWRST;              // Use SMCLK, keep SW reset
-    UCB0BR0     = PRESCALE;                        // Set prescaler - SMCLK = ~1048Khz/12 = 87.3Khz
-    UCB0BR1     = 0;
-    UCB0I2CSA   = subAddress;                    // Set sub address
-    UCB0CTL1   &= ~UCSWRST;                        // Clear SW reset, resume operation
-    UCB0I2CIE   = UCNACKIE;                        // Interrupt on sub Nack
-    IE2         = UCB0TXIE;                        // Enable TX interrupt
-}
+    WDTCTL = WDTPW + WDTHOLD; // Stop watchdog
 
-void init_I2Cread(unsigned char subAddress){
-    P1SEL |= BIT6 + BIT7;   // Assign P1.6 to SCL and P1.7 to SDA
-    P1SEL2 |= BIT6 + BIT7;
+    _EINT(); // enable interrupts
 
-    // Configure I2C module
-    UCB0CTL1 |= UCSWRST;    // Enable software reset
-    UCB0CTL0 = UCMST + UCMODE_3 + UCSYNC;   // Main mode, I2C mode, synchronous mode
-    UCB0CTL1 = UCSSEL_2 + UCSWRST;  // Clock source: SMCLK, keep in reset
-    UCB0BR0 = 12;   // Set clock divider for desired clock frequency (adjust according to your application)
-    UCB0BR1 = 0;
-    UCB0I2CSA  = subAddress; //set sub address
-    UCB0CTL1 &= ~UCSWRST;   // Release software reset
-    IE2 |= UCB0RXIE;                          // Enable RX interrupt
+    //UltrasonicInit(); //initialize ultrasonic module
+    LcdInit(); // initialize LCD display
 
-}
+    WDTCTL = WDTPW + WDTHOLD;                 // Stop watchdog timer                           // P1.0/6 setup for LED output
+    BCSCTL1 = CALBC1_1MHZ;
+    DCOCTL = CALDCO_1MHZ;
+    BCSCTL3 |= LFXT1S_2;
 
 
-void I2C_read(unsigned char subAddress) {
-    // Send start condition
-    init_I2Cread(subAddress);
-    byteRead = 7; // number of bytes that you want to read
-    UCB0CTL1 |= UCTXSTT; // send start condition
-}
-void I2cTransmit(unsigned char subAddress, unsigned char reg, unsigned char command, unsigned char third, unsigned char Read)
-{
-    I2cTransmitInit(subAddress); // send transmit signal
-    byteToTransmit[1] = command;  // transmit the command you want to send
-    byteToTransmit[0] = third;  // second part of the command
-    byteToTransmit[2] = reg;   // transmit the register you want to write to
-    byteSent = 3;      /number of bytes you want to transmit
-    UCB0CTL1 |= UCTR + UCTXSTT; // Generate start condition
-}
-
-unsigned char I2cNotReady()
-{
-    return (UCB0STAT & UCBBUSY); // Check if I2C bus is busy
-}
-void sendData(char data){ // sending UART DATA
-    while(!(IFG2&UCA0TXIFG)); // wait for it to be clear
-    UCA0TXBUF = data;   // write the data to the transmit buffer
-
-}
-
-void tempRead(){
-    unsigned char temp0; //first temperature byte
-    unsigned char temp1; //second temperature byte
-    unsigned char temp2; //half temperature byte
-    unsigned char hum0; //first humiditiy byte
-    unsigned char hum1; //second humiditiy byte
-    unsigned char hum2; //half humidity byte
-    float denom; //denominator
-    denom = pow(2, 20); //dividing factor
-    temp = 0;  
-    hum = 0;
-    I2cTransmit(0x38,0xAC,0x33,0x00,3); //send command to take measurement
-    __delay_cycles(200000); //wait 
-    I2C_read(0x38); //read 7 bytes of data
-    __delay_cycles(200000); //wait
-    temp2 = RXData[3] & 0x0F; //mask to only get temp data
-    temp1 = RXData[2]; //move to character
-    temp0 = RXData[1]; //move to character
-    hum2 = RXData[5]; //move to character
-    hum1 = RXData[4]; //move to character
-    hum0 = RXData[3] & 0xF0; //mask to only get humidity data
-    temp <<= 8; //shift
-    temp |= temp2; //set
-    temp <<= 8; //shift
-    temp |= temp1; //set
-    temp <<= 8; //shift
-    temp |= temp0; //set
-    hum <<= 8; //shift
-    hum |= hum2; //set
-    hum <<= 8; //shift
-    hum |= hum1; //set
-    hum <<= 8; //shift
-    hum |= hum0; //set
-    hum >>=4; //shift back(top part don't need zeros)
-    floattemp = (float)temp; //convert to floats
-    floathum = (float)hum;
-    floattemp = ((floattemp/denom) *200) -50; //calculate using formulas
-    floathum = (floathum/denom)*100;
-}
-
-void main(void)
-{
-    WDTCTL = WDTPW + WDTHOLD; // Stop watchdog timer
-
-    // Configure Clock
-    BCSCTL1 = CALBC1_1MHZ;     // Set range
-    DCOCTL = CALDCO_1MHZ;      // Set DCO step + modulation
-    BCSCTL3 |= LFXT1S_2;       // ACLK = VLO
-
-    // UART CONFIGURATION
-    P1SEL = BIT1|BIT2;
-    P1SEL2 = BIT1|BIT2;                     // P1.1 = RXD, P1.2=TXD
-    UCA0CTL1 |= UCSWRST+UCSSEL_2;   / pause to give settings + select SMCLK
-    UCA0BR0 = 52; // 9600 baud rate running on SMCLK
-    UCA0BR1 = 0;
+    P1SEL = BIT1 + BIT2 ;                     // P1.1 = RXD, P1.2=TXD
+    P1SEL2 = BIT1 + BIT2;
+    UCA0CTL1 |= UCSWRST + UCSSEL_2;            // CLK = SMCLK
+    UCA0BR0 = 52;                           // set for 9600 baud rate running on SMCLK
+    UCA0BR1 = 0x00;
     UCA0MCTL = UCBRS1 + UCBRS0;               // Modulation UCBRSx = 3
     UCA0CTL1 &= ~UCSWRST;                     // **Initialize USCI state machine**
-    IE2 &= ~(UCA0RXIE| UCA0TXIE);               // Disable any interrupts -- to keep i2c functioning properly 
-
-    // Configuring output pins
-    P2DIR |= BIT5; // We need P2.5 to be output
-    P2DIR |= BIT1; // Set P2.1 as output
-    P2DIR |= BIT3; // Output on 2.3
-    P2DIR |= BIT4; // Output on 2.4
-    P2SEL |= BIT5; // P2.5 is TA1.2 PWM output
-    P2SEL &= ~BIT3; // make sure bit3 is gpio
-    P2SEL &= ~BIT4; // make sure the bit4 is gpio
-
-    TA1CCTL2 = OUTMOD_7; // setting to set reset mode
-    TA1CTL = TASSEL_2 + MC_1; // SMCLK, upmode
+    bit = 0;
 
 
-    // Configuring 10 bit adc
-    ADC10CTL1 = INCH_7 + ADC10DIV_0 + CONSEQ_3 + SHS_0; // enabling adc to read from entire of port 1
-    ADC10CTL0 = SREF_0 + ADC10SHT_2 + MSC + ADC10ON; // turning adc on and configuring some variables
-    ADC10AE0 = BIT5 + BIT4 + BIT3 + BIT0; // only saying that ADC works for P1.0, 1.3, 1.4, 1.5
-    ADC10DTC1 = 8; // Data transfer packet size
 
-    int volmod = 10; // variable for turning the buzzer off essentially
-
-    // Configure Timer A0 to give us interrupts being driven by ACLK
-    TA0CTL = TASSEL_1 + MC_2 + TAIE;  // ACLK, upmode, counter interrupt enable
-
-    TA0CCR0 = ONE_SEC;  // Register 0 counter value to trigger interrupt
-    TA0CCTL0 = CCIE;    // CCR0 interrupt enabled
-    TA0CTL = TASSEL_2 + MC_1 + ID_3;    // Use SMCLK as the clock source, Up mode
-    _EINT(); // enable interrupts
-    __enable_interrupt(); // global interrupt enable
-
-    while(1){
-        if (curr_interval >= CHECK_INTERVAL){
-        ADC10CTL0 &= ~ENC;
-        while (ADC10CTL1 & BUSY); // wait until the adc is not busy
-        ADC10CTL0 |= ENC + ADC10SC;
-        ADC10SA = (unsigned int)adc; // grab all the values from the ADC after confirming that it is the 10 bit adc
-        chartemp = (char)floattemp; // cast temp and humidity to char
-        charhum = (char)floathum;
-
-        soil_voltage = adc[3] * 3.3 / 1023; // convert soil ADC reading to voltage
-        water_voltage = adc[4] * 3.3 / 1023; // do same for water level adc reading
-        light_voltage = adc[2] * 3.3 / 1023; // and light level adc reading
-
-        if (soil_voltage > 2.7){
-             // turn on the pump if soil is too dry
-            P2OUT |= BIT3;
-            curr_interval = CHECK_INTERVAL - 1; // set it here so we check very quickly if the soil still needs pump
-        } else {
-             // turn off the pump once ideal wetness achieved
-            P2OUT &= ~BIT3;
-        }
-        if (water_voltage < 1.0){
-            // screech that you don't have water
-             // Divide by 2
-            volmod = 1;
-            curr_interval = CHECK_INTERVAL - 1; // quick checks to make sure it turns off within a second of getting water
-        } else {
-            volmod = 10; // turn buzzer volume down to essentially 0
-
-        }
-        if (light_voltage > 3.1){ // these can update on the hour, won't be a problem
-            P2OUT |= BIT4; // turn off the lights
-        } else {
-            P2OUT &= ~BIT4; // turn on the lights
-        }
-        tempRead(); // read the temperature and humidity always
-        sendData(chartemp); // send data to LCD
-        sendData(charhum);
-        TA1CCR0 = periods[which_period]; // update the state of the buzzer always
-        TA1CCR2 = periods[which_period]>>volmod;
-        } else {
-            curr_interval++; // increment curr interval to get closer to the next time to run logic
-        }
-        __bis_SR_register(LPM0_bits + GIE); // enter LPM0 after being woken up and running this once
-    }
-}
-
-// Timer 0 interrupt service routine for register 0
-#if defined(__TI_COMPILER_VERSION__) || defined(__IAR_SYSTEMS_ICC__)
-#pragma vector=TIMER0_A0_VECTOR
-__interrupt void Timer0_A0 (void)
-#elif defined(__GNUC__)
-void __attribute__ ((interrupt(TIMER0_A0_VECTOR))) Timer_A0 (void)
-#else
-#error Compiler not supported!
-#endif
-{
-    TA0CCR0 += ONE_SEC;                       // Increment register 0 value for next interrupt
-    __bic_SR_register_on_exit(LPM0_bits);     // Clear LPM3 bits from 0(SR)
-}
-
-//I2C Interrupt R
-#pragma vector = USCIAB0TX_VECTOR
-__interrupt void USCIAB0TX_ISR(void)
-{
-    if (!(IFG2 & UCB0RXIFG)) //if on Transmit flag
+    while (1)
     {
-        if (byteSent == 0) // If the last byte was sent...
-        {
-            UCB0CTL1 |= UCTXSTP; // Generate stop condition
-            IFG2 &= ~UCB0TXIFG; //clear the flag
-        }
-        else
-        {
-            UCB0TXBUF = byteToTransmit[byteSent-1]; // Send the byte
-            byteSent--; // Modify the variable accordingly
-        }
-    }
-    else if ((IFG2 & UCB0RXIFG))
-    {
-        if (byteRead == 0) // If the last byte was sent...
-        {
-            UCB0CTL1 |= UCTXSTP; // Generate stop condition
-            IFG2 &= ~UCB0RXIFG; //clear the flag
-        }
-        else
-        {
-            RXData[byteRead-1] = UCB0RXBUF;       //Read data
-            byteRead--; // Modify the variable accordingly
-        }
+        readData();
+        LcdSetPosition(1,1);
+        LcdWriteString("Temperature:");
+        LcdSetPosition(1,13);
+        LcdWriteString(str_temp);
+        LcdSetPosition(2,1);
+        LcdWriteString("Humidity:");
+        LcdSetPosition(2,10);
+        LcdWriteString(str_hum);
+        __delay_cycles(200000);
     }
 
+return 0;
+
 }
+
