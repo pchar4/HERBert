@@ -1,9 +1,8 @@
 // Code originally from:
 // https://github.com/andrei-cb/I2C-Display-and-MSP430/tree/master
-// Then modified by Joe Young
+// Then modified by Joe Young and Dawson Franklin
 
 #include "lcd.h"
-#include "ultrasonic.h"
 #include "stdio.h"
 #include "msp430g2553.h"
 
